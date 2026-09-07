@@ -1,0 +1,7 @@
+[user]
+	name = dinhtrkien
+	email = dinhtrungkien2003@gmail.com
+[init]
+	defaultBranch = main
+[core]
+	pager = less -FRX

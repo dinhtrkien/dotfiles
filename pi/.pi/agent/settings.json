@@ -1,0 +1,30 @@
+{
+  "lastChangelogVersion": "0.85.1",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "autocompleteMaxVisible": 7,
+  "treeFilterMode": "default",
+  "tuiMode": "regular",
+  "images": {
+    "blockImages": false
+  },
+  "terminal": {
+    "showImages": true
+  },
+  "hideThinkingBlock": true,
+  "quietStartup": true,
+  "theme": "rose-pine-moon",
+  "steeringMode": "all",
+  "followUpMode": "all",
+  "collapseChangelog": true,
+  "packages": [
+    "npm:pi-web-access@0.14.0",
+    "npm:@ryan_nookpi/pi-extension-codex-fast-mode@0.2.6",
+    "npm:@siddr/pi-side"
+  ],
+  "enabledModels": [
+    "openai-codex/gpt-5.6-luna",
+    "openai-codex/gpt-5.6-sol",
+    "openai-codex/gpt-5.6-terra"
+  ]
+}

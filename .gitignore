@@ -1,0 +1,16 @@
+# Pi credentials and runtime data
+pi/.pi/agent/auth.json
+pi/.pi/agent/sessions/
+pi/.pi/agent/models-store.json
+pi/.pi/agent/npm/node_modules/
+
+# VS Code machine state
+code/.config/Code/User/globalStorage/
+
+# Local secrets and editor files
+*.local
+*.secret
+.env
+.env.*
+*.swp
+*~

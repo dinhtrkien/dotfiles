@@ -3,18 +3,23 @@
 // Adapted from the Firstmate project's Calm implementation.
 // Copyright (c) 2026 Kun Chen. MIT License - see the LICENSE file in this directory.
 //
-// Verified against Pi 0.82.0, which exports AgentSession and
-// ToolExecutionComponent. The source-aware lookup returns Pi's active definition
-// unchanged and the adapter changes only its final TUI row layout. Execution,
-// settings, SDK overrides, extension collisions, and stored results remain
-// owned by Pi. Image results remain visible without their call/result shell,
-// Pi's seven built-ins plus the pi-web-access tools are hidden; other custom
-// tools render unchanged.
-import {
-  AgentSession,
-  ToolExecutionComponent,
-  type ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+// Verified against Pi 0.82.0 and 0.84.4.
+//
+// Fix vs. the original 0.82 adapter: the previous version only hid a row when
+// Pi handed ToolExecutionComponent both a toolName in the hidden set *and* a
+// defined `toolDefinition` that it had previously seen flow through
+// AgentSession.getToolDefinition (recorded in a WeakSet). On Pi 0.84.4 that is
+// no longer reliable: rows restored from session history (session resume,
+// /reload) are constructed with `toolDefinition === undefined` because
+// InteractiveMode.getRegisteredToolDefinition() returns nothing for a tool that
+// is not in the *current* registry, so `state.toolDefinition !== undefined`
+// was false and every restored row rendered at full height. Live rows still
+// hid, which is why the breakage looked intermittent.
+//
+// This adapter now keys off `state.toolName` alone, so live and restored rows
+// both collapse. Presentation only: execution, results, session storage, and
+// export data are untouched; image results stay visible without their shell.
+import { ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { calmHidesTranscriptChrome } from "./visibility.ts";
 
@@ -26,10 +31,12 @@ const CALM_BUILT_IN_TOOL_NAMES = new Set([
   "grep",
   "find",
   "ls",
+  // Added by Pi 0.84.3 for Windows; kept hidden like the other built-ins.
+  "powershell",
 ]);
 
 // pi-web-access registers these as custom tools, so they need an explicit
-// allowlist entry instead of relying on source === "builtin" below.
+// allowlist entry instead of relying on a source === "builtin" lookup.
 const CALM_WEB_TOOL_NAMES = new Set([
   "web_search",
   "source_check",
@@ -44,20 +51,16 @@ const CALM_HIDDEN_TOOL_NAMES = new Set([
 
 type ToolRowPresentationState = {
   toolName: string;
-  toolDefinition?: ToolDefinition;
-  imageComponents: Component[];
-  imageSpacers: Component[];
-};
-
-type AgentSessionPresentationState = {
-  _baseToolsOverride?: Record<string, unknown>;
+  imageComponents?: Component[];
+  imageSpacers?: Component[];
 };
 
 type CalmBuiltInToolShellPatch = {
   hidesShell: () => boolean;
-  builtInDefinitions: WeakSet<ToolDefinition>;
 };
 
+// Keep the introduction-version symbol stable so a compatible upgrade cannot
+// double-patch a live process.
 const CALM_BUILT_IN_TOOL_SHELL_PATCH = Symbol.for(
   "pi-calm:built-in-tool-shell-layout:pi-0.82.0",
 );
@@ -68,15 +71,11 @@ export function installCalmBuiltInToolShellLayout(): void {
   };
   const hidesShell = (): boolean => calmHidesTranscriptChrome();
   const installed = registry[CALM_BUILT_IN_TOOL_SHELL_PATCH];
-  if (installed?.builtInDefinitions) {
+  if (installed) {
     installed.hidesShell = hidesShell;
     return;
   }
 
-  const originalGetToolDefinition = AgentSession.prototype.getToolDefinition;
-  if (typeof originalGetToolDefinition !== "function") {
-    throw new Error("Pi Calm requires Pi AgentSession.getToolDefinition");
-  }
   if (typeof ToolExecutionComponent !== "function") {
     throw new Error("Pi Calm requires Pi ToolExecutionComponent");
   }
@@ -85,44 +84,25 @@ export function installCalmBuiltInToolShellLayout(): void {
     throw new Error("Pi Calm requires Pi ToolExecutionComponent.render");
   }
 
-  if (installed) installed.hidesShell = () => false;
-
-  const patch: CalmBuiltInToolShellPatch = {
-    hidesShell,
-    builtInDefinitions: new WeakSet(),
-  };
-  AgentSession.prototype.getToolDefinition = function (
-    name: string,
-  ): ToolDefinition | undefined {
-    const definition = originalGetToolDefinition.call(this, name);
-    const source = this.getAllTools().find((tool) => tool.name === name)?.sourceInfo.source;
-    if (definition) {
-      const session = this as unknown as AgentSessionPresentationState;
-      const isSdkBaseOverride = Object.hasOwn(session._baseToolsOverride ?? {}, name);
-      if ((source === "builtin" && !isSdkBaseOverride) || CALM_WEB_TOOL_NAMES.has(name)) {
-        patch.builtInDefinitions.add(definition);
-      } else {
-        patch.builtInDefinitions.delete(definition);
-      }
-    }
-    return definition;
-  };
-
-  ToolExecutionComponent.prototype.render = function (width: number): string[] {
+  const patch: CalmBuiltInToolShellPatch = { hidesShell };
+  ToolExecutionComponent.prototype.render = function (
+    width: number,
+  ): string[] {
     const state = this as unknown as ToolRowPresentationState;
-    const isKnownHiddenTool =
-      CALM_HIDDEN_TOOL_NAMES.has(state.toolName) &&
-      state.toolDefinition !== undefined &&
-      patch.builtInDefinitions.has(state.toolDefinition);
-    if (!isKnownHiddenTool || !patch.hidesShell()) {
+    // Key off the tool name only. Requiring a captured toolDefinition dropped
+    // every row restored from session history on Pi 0.84+ (see file header).
+    if (!CALM_HIDDEN_TOOL_NAMES.has(state.toolName) || !patch.hidesShell()) {
       return originalRender.call(this, width);
     }
 
+    // Keep image results visible without their call/result shell.
     const lines: string[] = [];
-    for (let index = 0; index < state.imageComponents.length; index += 1) {
-      const spacer = state.imageSpacers[index];
+    const spacers = state.imageSpacers ?? [];
+    const images = state.imageComponents ?? [];
+    for (let index = 0; index < images.length; index += 1) {
+      const spacer = spacers[index];
       if (spacer) lines.push(...spacer.render(width));
-      const image = state.imageComponents[index];
+      const image = images[index];
       if (image) lines.push(...image.render(width));
     }
     return lines;

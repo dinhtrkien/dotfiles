@@ -59,8 +59,13 @@ export function installCalmCollapsedThinkingLayout(): void {
     throw new Error("Pi Calm requires Pi AssistantMessageComponent.updateContent");
   }
 
+  // Pi 0.84 added a second `isStreaming` argument to updateContent (0.82 had
+  // only `message`). Forward every argument: the original adapter dropped it,
+  // which pinned the component's isStreaming state and broke Pi's streaming
+  // markdown transforms. The thinking filter itself only concerns `message`.
   AssistantMessageComponent.prototype.updateContent = function (
     message: AssistantMessage,
+    ...rest: unknown[]
   ): void {
     const state = this as unknown as AssistantMessagePresentationState;
     const hideThinking =
@@ -74,7 +79,11 @@ export function installCalmCollapsedThinkingLayout(): void {
         }
       : message;
 
-    originalUpdateContent.call(this, presentationMessage);
+    (originalUpdateContent as (...args: unknown[]) => void).call(
+      this,
+      presentationMessage,
+      ...rest,
+    );
     if (presentationMessage !== message) state.lastMessage = message;
   };
 
